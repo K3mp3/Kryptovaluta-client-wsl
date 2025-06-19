@@ -6,7 +6,6 @@ const email = ref('')
 const password = ref('')
 
 const handleSignIn = async () => {
-  // Validate that fields are not empty
   if (!email.value.trim() || !password.value.trim()) {
     alert('Please fill in both email and password')
     return
@@ -29,10 +28,8 @@ const handleSignIn = async () => {
     const data = await response.json()
 
     if (response.ok && data.success) {
-      // Spara JWT-token i localStorage
       localStorage.setItem('token', data.data.token)
 
-      // Navigera till user-home
       router.push('/user-home')
     } else {
       alert('Fel vid inloggning: ' + (data.message || 'Okänt fel'))
