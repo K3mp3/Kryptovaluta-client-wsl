@@ -13,6 +13,27 @@ const newTransaction = ref({
   amount: 0,
 })
 
+const walletInfo = ref({
+  address: '',
+  balance: 0,
+})
+
+const fetchWalletInfo = async () => {
+  try {
+    const response = await fetch('http://localhost:3000/api/transaction/wallet', {
+      headers: {
+        Authorization: `Bearer ${getToken()}`,
+      },
+    })
+    const data = await response.json()
+    if (data.success) {
+      walletInfo.value = data.data
+    }
+  } catch (error) {
+    console.error('Error fetching wallet info:', error)
+  }
+}
+
 const getToken = () => localStorage.getItem('token')
 
 const fetchBlocks = async () => {
@@ -24,8 +45,19 @@ const fetchBlocks = async () => {
       },
     })
     const data = await response.json()
+
     if (data.success) {
-      blocks.value = data.data.chain || data.data
+      if (Array.isArray(data.data)) {
+        blocks.value = data.data
+      } else if (data.data.chain && Array.isArray(data.data.chain)) {
+        blocks.value = data.data.chain
+      } else if (data.data && typeof data.data === 'object') {
+        blocks.value = [data.data]
+      } else {
+        blocks.value = []
+      }
+    } else {
+      alert('Fel vid hämtning av block: ' + (data.message || 'Okänt fel'))
     }
   } catch (error) {
     console.error('Error fetching blocks:', error)
@@ -44,8 +76,11 @@ const fetchTransactions = async () => {
       },
     })
     const data = await response.json()
+
     if (data.success) {
-      transactions.value = data.data
+      transactions.value = data.data || []
+    } else {
+      alert('Fel vid hämtning av transaktioner: ' + (data.message || 'Okänt fel'))
     }
   } catch (error) {
     console.error('Error fetching transactions:', error)
@@ -78,7 +113,7 @@ const createTransaction = async () => {
     if (data.success) {
       alert('Transaktion skapad!')
       newTransaction.value = { from: '', to: '', amount: 0 }
-      fetchTransactions()
+      await fetchTransactions()
     } else {
       alert('Fel vid skapande av transaktion: ' + data.error)
     }
@@ -124,6 +159,7 @@ const logout = () => {
 onMounted(() => {
   fetchBlocks()
   fetchTransactions()
+  fetchWalletInfo()
 })
 </script>
 
@@ -162,7 +198,6 @@ onMounted(() => {
     </nav>
 
     <main class="main-content">
-      <!-- Skapa Transaktion -->
       <div v-if="activeTab === 'create'" class="tab-content">
         <h2>Skapa Ny Transaktion</h2>
         <form @submit.prevent="createTransaction" class="transaction-form">
@@ -206,38 +241,80 @@ onMounted(() => {
         </form>
       </div>
 
-      <!-- Transaktioner -->
       <div v-if="activeTab === 'transactions'" class="tab-content">
         <h2>Mina Transaktioner</h2>
         <div v-if="loading" class="loading">Laddar transaktioner...</div>
         <div v-else-if="transactions.length === 0" class="empty">Inga transaktioner hittades</div>
-        <div v-else class="transactions-list">
-          <div v-for="transaction in transactions" :key="transaction.id" class="transaction-card">
+        <div v-else class="transactions-container">
+          <div
+            v-for="(transaction, index) in transactions"
+            :key="transaction.id || transaction.transactionId || index"
+            class="transaction-card"
+          >
             <div class="transaction-header">
-              <h4>Transaktion: {{ transaction.id.substring(0, 8) }}...</h4>
-              <span :class="['status', transaction.status]">{{ transaction.status }}</span>
+              <div class="transaction-info">
+                <h4 class="transaction-title">
+                  Transaktion:
+                  {{
+                    (transaction.id || transaction.transactionId || 'Okänd')?.substring(0, 8) ||
+                    'N/A'
+                  }}...
+                </h4>
+              </div>
+              <div class="transaction-status">
+                <span :class="['status-badge', transaction.status || 'unknown']">
+                  {{ (transaction.status || 'unknown').toUpperCase() }}
+                </span>
+              </div>
             </div>
+
             <div class="transaction-details">
-              <p><strong>Från:</strong> {{ transaction.input.address.substring(0, 20) }}...</p>
-              <p><strong>Belopp:</strong> {{ transaction.input.amount }}</p>
-              <p>
-                <strong>Tidsstämpel:</strong>
-                {{ new Date(transaction.input.timestamp).toLocaleString() }}
-              </p>
-              <div v-if="transaction.outputMap">
+              <div v-if="transaction.input?.address === '#reward-address#'" class="reward-info">
+                <p class="reward-label">🏆 Mining Belöning</p>
+                <p><strong>Belopp:</strong> N/A (Systemgenererad belöning)</p>
+                <p><strong>Tidsstämpel:</strong> N/A</p>
+              </div>
+
+              <div v-else class="regular-info">
+                <p>
+                  <strong>Från:</strong>
+                  {{ transaction.input?.address?.substring(0, 20) || 'N/A' }}...
+                </p>
+                <p><strong>Belopp:</strong> {{ transaction.input?.amount || 'N/A' }}</p>
+                <p>
+                  <strong>Tidsstämpel:</strong>
+                  {{
+                    transaction.input?.timestamp
+                      ? new Date(transaction.input.timestamp).toLocaleString()
+                      : 'N/A'
+                  }}
+                </p>
+              </div>
+
+              <div
+                v-if="transaction.outputMap && Object.keys(transaction.outputMap).length > 0"
+                class="output-section"
+              >
                 <strong>Mottagare:</strong>
-                <ul>
-                  <li v-for="(amount, address) in transaction.outputMap" :key="address">
-                    {{ address.substring(0, 20) }}... : {{ amount }}
-                  </li>
-                </ul>
+                <div class="output-list">
+                  <div
+                    v-for="(amount, address) in transaction.outputMap"
+                    :key="address"
+                    class="output-item"
+                  >
+                    <span class="output-address">{{ address?.substring(0, 20) || 'N/A' }}...</span>
+                    <span class="output-amount">{{ amount || 0 }} coins</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="no-output">
+                <p><em>Ingen outputMap tillgänglig</em></p>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Blockchain -->
       <div v-if="activeTab === 'blocks'" class="tab-content">
         <h2>Blockchain</h2>
         <div v-if="loading" class="loading">Laddar block...</div>
@@ -249,25 +326,99 @@ onMounted(() => {
               <span class="timestamp">{{ new Date(block.timestamp).toLocaleString() }}</span>
             </div>
             <div class="block-details">
-              <p>
-                <strong>Hash:</strong> <code>{{ block.hash }}</code>
-              </p>
-              <p>
-                <strong>Tidigare Hash:</strong> <code>{{ block.prevHash }}</code>
-              </p>
-              <p><strong>Nonce:</strong> {{ block.nonce }}</p>
-              <p><strong>Svårighet:</strong> {{ block.difficulty }}</p>
-              <p><strong>Antal Transaktioner:</strong> {{ block.data.length }}</p>
-              <div v-if="block.data.length > 0">
-                <strong>Transaktioner:</strong>
-                <pre>{{ JSON.stringify(block.data, null, 2) }}</pre>
+              <div class="block-info">
+                <p>
+                  <strong>Hash:</strong> <code>{{ block.hash.substring(0, 32) }}...</code>
+                </p>
+                <p>
+                  <strong>Tidigare Hash:</strong>
+                  <code>{{
+                    block.prevHash === '---'
+                      ? 'Genesis Block'
+                      : block.prevHash.substring(0, 32) + '...'
+                  }}</code>
+                </p>
+                <p><strong>Nonce:</strong> {{ block.nonce }}</p>
+                <p><strong>Svårighet:</strong> {{ block.difficulty }}</p>
+                <p><strong>Antal Transaktioner:</strong> {{ block.data.length }}</p>
               </div>
+
+              <div v-if="block.data.length > 0" class="transactions-section">
+                <h4>Transaktioner i detta block:</h4>
+                <div
+                  v-for="(transaction, txIndex) in block.data"
+                  :key="transaction.id || txIndex"
+                  class="transaction-item"
+                >
+                  <div
+                    v-if="transaction.input && transaction.input.address !== '#reward-address#'"
+                    class="regular-transaction"
+                  >
+                    <div class="transaction-header-small">
+                      <strong>💸 Transaktion {{ txIndex + 1 }}</strong>
+                      <span class="tx-id"
+                        >ID:
+                        {{ transaction.id ? transaction.id.substring(0, 8) + '...' : 'N/A' }}</span
+                      >
+                    </div>
+                    <div class="transaction-details-small">
+                      <p>
+                        <strong>Från:</strong> {{ transaction.input.address.substring(0, 20) }}...
+                      </p>
+                      <p><strong>Ursprungligt belopp:</strong> {{ transaction.input.amount }}</p>
+                      <p>
+                        <strong>Tidpunkt:</strong>
+                        {{ new Date(transaction.input.timestamp).toLocaleString() }}
+                      </p>
+
+                      <div class="output-map">
+                        <strong>Fördelning:</strong>
+                        <div
+                          v-for="(amount, address) in transaction.outputMap"
+                          :key="address"
+                          class="output-item-small"
+                        >
+                          <span class="address">{{ address.substring(0, 20) }}...</span>
+                          <span class="amount">{{ amount }} coins</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div v-else class="reward-transaction">
+                    <div class="transaction-header-small">
+                      <strong>🏆 Mining Belöning</strong>
+                      <span class="tx-id"
+                        >ID:
+                        {{ transaction.id ? transaction.id.substring(0, 8) + '...' : 'N/A' }}</span
+                      >
+                    </div>
+                    <div class="transaction-details-small">
+                      <div class="output-map">
+                        <strong>Belöning till:</strong>
+                        <div
+                          v-for="(amount, address) in transaction.outputMap"
+                          :key="address"
+                          class="output-item-small"
+                        >
+                          <span class="address">{{ address.substring(0, 20) }}...</span>
+                          <span class="amount">{{ amount }} coins</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <details class="raw-data-toggle">
+                <summary>Visa rå blockdata (JSON)</summary>
+                <pre class="raw-json">{{ JSON.stringify(block, null, 2) }}</pre>
+              </details>
             </div>
           </div>
         </div>
       </div>
 
-      <!-- Mining -->
       <div v-if="activeTab === 'mine'" class="tab-content">
         <div class="mining-section">
           <h2>Gräv Block</h2>
@@ -290,217 +441,597 @@ onMounted(() => {
   </div>
 </template>
 
-<style scoped>
+<style>
 .user-home {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 20px;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: #f5f5f5;
 }
 
 .header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  padding: 1rem 2rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
-  padding-bottom: 20px;
-  border-bottom: 2px solid #eee;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
 }
 
 .header h1 {
-  color: #ffffff;
   margin: 0;
+  font-size: 1.8rem;
 }
 
 .logout-btn {
-  background: #dc3545;
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
   color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
+  padding: 0.5rem 1rem;
+  border-radius: 5px;
   cursor: pointer;
+  transition: background 0.3s;
 }
 
 .logout-btn:hover {
-  background: #c82333;
+  background: rgba(255, 255, 255, 0.3);
 }
 
 .nav-tabs {
+  background: white;
+  padding: 0 2rem;
   display: flex;
-  gap: 10px;
-  margin-bottom: 30px;
-  border-bottom: 1px solid #ddd;
+  gap: 0;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
 
 .tab-btn {
   background: none;
   border: none;
-  padding: 12px 20px;
+  padding: 1rem 1.5rem;
   cursor: pointer;
+  font-weight: 500;
+  color: #666;
   border-bottom: 3px solid transparent;
   transition: all 0.3s;
-  color: #fff;
 }
 
 .tab-btn:hover {
-  background: #f8f9fa;
-  color: #000;
+  color: #667eea;
+  background: #f8f9ff;
 }
 
 .tab-btn.active {
-  border-bottom-color: #007bff;
-  color: #007bff;
-  font-weight: bold;
+  color: #667eea;
+  border-bottom-color: #667eea;
+  background: #f8f9ff;
 }
 
 .main-content {
-  min-height: 400px;
+  flex: 1;
+  padding: 2rem;
+  overflow: hidden;
+  max-height: calc(100vh - 140px);
 }
 
-.readonly-input {
-  background-color: #f8f9fa !important;
-  color: #6c757d !important;
-  cursor: not-allowed !important;
+.tab-content {
+  height: 100%;
+  overflow-y: auto;
+  padding-right: 0.5rem;
 }
 
-.form-group small {
-  display: block;
-  margin-top: 5px;
-  color: #6c757d;
-  font-size: 0.85em;
+.tab-content::-webkit-scrollbar {
+  width: 8px;
 }
 
-.loading,
-.empty {
-  text-align: center;
-  padding: 40px;
-  color: #666;
+.tab-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 4px;
 }
 
-.blocks-list,
-.transactions-list {
-  display: grid;
-  gap: 20px;
+.tab-content::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 4px;
 }
 
-.block-card,
-.transaction-card {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  padding: 20px;
+.tab-content::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+.blocks-list {
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.transactions-container {
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+  padding-right: 0.5rem;
+}
+
+.block-card {
   background: white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border-radius: 10px;
+  margin-bottom: 1.5rem;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  overflow: hidden;
+  border: 1px solid #e1e5e9;
 }
 
 .block-header {
+  background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+  color: white;
+  padding: 1rem 1.5rem;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 15px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid #eee;
 }
 
 .block-header h3 {
   margin: 0;
-  color: #333;
+  font-size: 1.2rem;
 }
 
 .timestamp {
-  color: #666;
-  font-size: 0.9em;
+  font-size: 0.9rem;
+  opacity: 0.9;
 }
 
-.block-details p {
-  margin: 8px 0;
-  word-break: break-all;
+.block-details {
+  padding: 1.5rem;
+  color: #2c2c2c;
 }
 
-.block-details code {
+.block-details p,
+.block-details strong,
+.block-details h4 {
+  color: #1a1a1a !important;
+  font-weight: 600;
+}
+
+.block-info {
+  margin-bottom: 1.5rem;
+}
+
+.block-info p {
+  margin: 0.5rem 0;
+  font-size: 0.95rem;
+  color: #2c2c2c;
+  font-weight: 500;
+}
+
+.block-info strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.block-info code {
   background: #f8f9fa;
-  padding: 2px 4px;
+  padding: 0.2rem 0.4rem;
   border-radius: 3px;
-  font-size: 0.9em;
+  font-family: 'Courier New', monospace;
+  font-size: 0.85rem;
+  color: #1a1a1a;
+  font-weight: 600;
 }
 
-.block-details pre {
-  background: #f8f9fa;
-  padding: 10px;
-  border-radius: 4px;
-  overflow-x: auto;
-  font-size: 0.8em;
+.transaction-card {
+  background: white;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e1e5e9;
+  overflow: hidden;
 }
 
-.transaction-form {
-  max-width: 500px;
-  margin: 0 auto;
+.transaction-header {
+  background: linear-gradient(135deg, #a8edea 0%, #fed6e3 100%);
+  padding: 1rem 1.5rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 
-.form-group {
-  margin-bottom: 20px;
+.transaction-title {
+  margin: 0;
+  font-size: 1rem;
+  color: #1a1a1a;
+  font-weight: 600;
 }
 
-.form-group label {
-  display: block;
-  margin-bottom: 5px;
+.status-badge {
+  padding: 0.3rem 0.8rem;
+  border-radius: 20px;
+  font-size: 0.8rem;
   font-weight: bold;
-}
-
-.form-group input {
-  width: 100%;
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 16px;
-}
-
-.submit-btn,
-.mine-btn {
-  background: #28a745;
-  color: white;
-  border: none;
-  padding: 12px 24px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 16px;
-  width: 100%;
-}
-
-.submit-btn:hover,
-.mine-btn:hover {
-  background: #218838;
-}
-
-.mine-btn:disabled {
-  background: #6c757d;
-  cursor: not-allowed;
-}
-
-.mining-section {
-  text-align: center;
-  max-width: 400px;
-  margin: 0 auto;
-}
-
-.mining-info {
-  margin-top: 20px;
-  padding-top: 20px;
-  border-top: 1px solid #eee;
-}
-
-.status {
-  padding: 2px 8px;
-  border-radius: 3px;
-  font-size: 0.8em;
   text-transform: uppercase;
 }
 
-.pending {
+.status-badge.pending {
   background: #fff3cd;
   color: #856404;
 }
 
-.confirmed {
+.status-badge.confirmed {
   background: #d4edda;
   color: #155724;
+}
+
+.status-badge.unknown {
+  background: #e2e3e5;
+  color: #383d41;
+}
+
+.transaction-details {
+  padding: 1.5rem;
+}
+
+.transaction-details p {
+  margin: 0.5rem 0;
+  color: #2c2c2c;
+  font-weight: 500;
+}
+
+.transaction-details strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.reward-info {
+  background: #fff8e1;
+  padding: 1rem;
+  border-radius: 5px;
+  border-left: 4px solid #ffc107;
+}
+
+.reward-info p {
+  color: #2c2c2c !important;
+  font-weight: 500;
+}
+
+.reward-info strong {
+  color: #1a1a1a !important;
+  font-weight: 600;
+}
+
+.reward-label {
+  font-weight: bold;
+  color: #e65100;
+  margin: 0 0 0.5rem 0;
+  font-size: 1rem;
+}
+
+.output-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #eee;
+}
+
+.output-list {
+  margin-top: 0.5rem;
+}
+
+.output-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid #f5f5f5;
+}
+
+.output-address {
+  font-family: 'Courier New', monospace;
+  font-size: 0.9rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.output-amount {
+  font-weight: bold;
+  color: #198754;
+  font-size: 1rem;
+}
+
+.transactions-section {
+  margin-top: 1.5rem;
+  padding-top: 1.5rem;
+  border-top: 2px solid #f8f9fa;
+}
+
+.transactions-section h4 {
+  color: #1a1a1a !important;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.transaction-item {
+  background: #f8f9fa;
+  border-radius: 6px;
+  margin-bottom: 1rem;
+  overflow: hidden;
+  border: 1px solid #e9ecef;
+}
+
+.transaction-header-small {
+  background: #e9ecef;
+  padding: 0.8rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.9rem;
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.tx-id {
+  font-family: 'Courier New', monospace;
+  font-size: 0.8rem;
+  color: #495057;
+  font-weight: 500;
+}
+
+.transaction-details-small {
+  padding: 1rem;
+}
+
+.transaction-details-small p {
+  margin: 0.3rem 0;
+  font-size: 0.9rem;
+  color: #2c2c2c;
+  font-weight: 500;
+}
+
+.transaction-details-small strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.output-map {
+  margin-top: 0.8rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid #dee2e6;
+}
+
+.output-map > strong {
+  color: #1a1a1a !important;
+  font-weight: 600;
+}
+
+.output-item-small {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.3rem 0;
+  font-size: 0.85rem;
+  color: #2c2c2c;
+  font-weight: 500;
+}
+
+.address {
+  font-family: 'Courier New', monospace;
+  color: #495057;
+  font-weight: 500;
+}
+
+.amount {
+  font-weight: bold;
+  color: #198754;
+  font-size: 0.9rem;
+}
+
+.reward-transaction {
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+}
+
+.reward-transaction .transaction-header-small {
+  background: #ffc107;
+  color: #333;
+}
+
+.transaction-form {
+  background: white;
+  padding: 2rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+}
+
+.form-group {
+  margin-bottom: 1.5rem;
+}
+
+.form-group label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #333;
+}
+
+.form-group input {
+  width: 100%;
+  padding: 0.8rem;
+  border: 2px solid #e1e5e9;
+  border-radius: 5px;
+  font-size: 1rem;
+  transition: border-color 0.3s;
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.readonly-input {
+  background: #f8f9fa !important;
+  color: #666 !important;
+}
+
+.form-group small {
+  display: block;
+  margin-top: 0.3rem;
+  color: #666;
+  font-size: 0.85rem;
+}
+
+.submit-btn {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  border-radius: 5px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+
+.submit-btn:hover {
+  transform: translateY(-2px);
+}
+
+.mining-section {
+  background: white;
+  padding: 2rem;
+  border-radius: 10px;
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  max-width: 600px;
+}
+
+.mine-btn {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  border: none;
+  padding: 1rem 2rem;
+  border-radius: 5px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: transform 0.2s;
+  margin: 1rem 0;
+}
+
+.mine-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+}
+
+.mine-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.mining-info {
+  background: #f8f9fa;
+  padding: 1rem;
+  border-radius: 5px;
+  margin-top: 1rem;
+}
+
+.mining-info p {
+  margin: 0.5rem 0;
+  color: #2c2c2c;
+  font-weight: 500;
+}
+
+.mining-info strong {
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.raw-data-toggle {
+  margin-top: 1.5rem;
+  border: 1px solid #e1e5e9;
+  border-radius: 5px;
+}
+
+.raw-data-toggle summary {
+  padding: 1rem;
+  background: #f8f9fa;
+  cursor: pointer;
+  font-weight: 500;
+}
+
+.raw-json {
+  background: #f8f9fa;
+  padding: 1rem;
+  margin: 0;
+  font-size: 0.8rem;
+  overflow-x: auto;
+  border-top: 1px solid #e1e5e9;
+}
+
+.loading {
+  text-align: center;
+  padding: 3rem;
+  color: #666;
+  font-size: 1.1rem;
+}
+
+.empty {
+  text-align: center;
+  padding: 3rem;
+  color: #999;
+  background: white;
+  border-radius: 10px;
+}
+
+@media (max-width: 768px) {
+  .header {
+    padding: 1rem;
+  }
+
+  .header h1 {
+    font-size: 1.5rem;
+  }
+
+  .nav-tabs {
+    padding: 0 1rem;
+    overflow-x: auto;
+  }
+
+  .tab-btn {
+    white-space: nowrap;
+    padding: 1rem;
+  }
+
+  .main-content {
+    padding: 1rem;
+    max-height: calc(100vh - 120px);
+  }
+
+  .blocks-list,
+  .transactions-container {
+    max-height: calc(100vh - 200px);
+  }
+
+  .block-header,
+  .transaction-header {
+    flex-direction: column;
+    gap: 0.5rem;
+    text-align: center;
+  }
+
+  .output-item,
+  .output-item-small {
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+
+  .transaction-form,
+  .mining-section {
+    padding: 1.5rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .main-content {
+    padding: 0.5rem;
+  }
+
+  .block-details,
+  .transaction-details {
+    padding: 1rem;
+  }
+
+  .form-group input {
+    font-size: 16px;
+  }
 }
 </style>
