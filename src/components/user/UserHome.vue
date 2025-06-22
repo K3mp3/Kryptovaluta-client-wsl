@@ -271,8 +271,26 @@ onMounted(() => {
             <div class="transaction-details">
               <div v-if="transaction.input?.address === '#reward-address#'" class="reward-info">
                 <p class="reward-label">🏆 Mining Belöning</p>
-                <p><strong>Belopp:</strong> N/A (Systemgenererad belöning)</p>
-                <p><strong>Tidsstämpel:</strong> N/A</p>
+
+                <p v-if="transaction.outputMap && Object.keys(transaction.outputMap).length > 0">
+                  <strong>Belöning:</strong>
+                  {{
+                    Object.values(transaction.outputMap).reduce((sum, amount) => sum + amount, 0)
+                  }}
+                  coins
+                </p>
+                <p v-else><strong>Belöning:</strong> Mining belöning</p>
+
+                <p>
+                  <strong>Tidpunkt:</strong>
+                  {{
+                    transaction.timestamp
+                      ? new Date(transaction.timestamp).toLocaleString()
+                      : transaction.input?.timestamp
+                        ? new Date(transaction.input.timestamp).toLocaleString()
+                        : 'Systemgenererad'
+                  }}
+                </p>
               </div>
 
               <div v-else class="regular-info">
@@ -295,7 +313,11 @@ onMounted(() => {
                 v-if="transaction.outputMap && Object.keys(transaction.outputMap).length > 0"
                 class="output-section"
               >
-                <strong>Mottagare:</strong>
+                <strong>{{
+                  transaction.input?.address === '#reward-address#'
+                    ? 'Belöning till:'
+                    : 'Mottagare:'
+                }}</strong>
                 <div class="output-list">
                   <div
                     v-for="(amount, address) in transaction.outputMap"
@@ -441,12 +463,16 @@ onMounted(() => {
   </div>
 </template>
 
-<style>
+<style scoped>
 .user-home {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
   background-color: #f5f5f5;
+}
+
+h2 {
+  color: #000000;
 }
 
 .header {
@@ -680,27 +706,45 @@ onMounted(() => {
 }
 
 .reward-info {
-  background: #fff8e1;
-  padding: 1rem;
-  border-radius: 5px;
+  background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+  padding: 1.5rem;
+  border-radius: 8px;
   border-left: 4px solid #ffc107;
+  position: relative;
+  overflow: hidden;
+}
+
+.reward-info::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 60px;
+  height: 60px;
+  background: rgba(255, 193, 7, 0.1);
+  border-radius: 50%;
+  transform: translate(20px, -20px);
 }
 
 .reward-info p {
-  color: #2c2c2c !important;
+  color: #1a1a1a !important;
   font-weight: 500;
+  margin: 0.5rem 0;
 }
 
 .reward-info strong {
-  color: #1a1a1a !important;
+  color: #e65100 !important;
   font-weight: 600;
 }
 
 .reward-label {
   font-weight: bold;
   color: #e65100;
-  margin: 0 0 0.5rem 0;
-  font-size: 1rem;
+  margin: 0 0 1rem 0;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
 
 .output-section {
@@ -731,6 +775,12 @@ onMounted(() => {
   font-weight: bold;
   color: #198754;
   font-size: 1rem;
+}
+
+.reward-info .output-amount {
+  color: #f57c00 !important;
+  font-weight: 700;
+  font-size: 1.1rem;
 }
 
 .transactions-section {
@@ -821,11 +871,23 @@ onMounted(() => {
 
 .reward-transaction {
   background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+  border: 2px solid #ffc107;
 }
 
 .reward-transaction .transaction-header-small {
-  background: #ffc107;
-  color: #333;
+  background: linear-gradient(135deg, #ffc107 0%, #ff9800 100%);
+  color: #1a1a1a;
+  font-weight: 600;
+}
+
+.reward-transaction .transaction-details-small {
+  background: rgba(255, 248, 225, 0.5);
+}
+
+.reward-transaction .amount {
+  color: #f57c00 !important;
+  font-weight: 700;
+  font-size: 0.95rem;
 }
 
 .transaction-form {
@@ -894,6 +956,18 @@ onMounted(() => {
   border-radius: 10px;
   box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
   max-width: 600px;
+}
+
+.mining-section h2 {
+  color: #1a1a1a !important;
+  font-weight: 600;
+  margin-bottom: 1rem;
+}
+
+.mining-section > p {
+  color: #2c2c2c !important;
+  font-weight: 500;
+  margin-bottom: 1.5rem;
 }
 
 .mine-btn {
@@ -970,6 +1044,16 @@ onMounted(() => {
   color: #999;
   background: white;
   border-radius: 10px;
+}
+
+.transaction-card:has(.reward-info):hover {
+  transform: translateY(-3px);
+  box-shadow: 0 8px 20px rgba(255, 193, 7, 0.2);
+}
+
+.transaction-item:has(.reward-transaction):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 15px rgba(255, 193, 7, 0.3);
 }
 
 @media (max-width: 768px) {
